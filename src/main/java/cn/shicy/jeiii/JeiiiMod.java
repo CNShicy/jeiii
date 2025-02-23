@@ -1,18 +1,24 @@
 package cn.shicy.jeiii;
 
+import cn.shicy.jeiii.network.NetworkManager;
+import cn.shicy.jeiii.network.PacketSyncJeiInfo;
 import com.google.gson.*;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.io.*;
 import java.nio.file.*;
+import java.util.*;
 
 @Mod(JeiiiMod.MODID)
 public class JeiiiMod {
@@ -26,8 +32,10 @@ public class JeiiiMod {
     }
 
     private void setup(final FMLCommonSetupEvent event) {
-        checkAndCreateDir();
-        processSmpFiles();
+        event.enqueueWork(() -> {
+            NetworkManager.register();
+            checkAndCreateDir();
+        });
     }
 
     private void checkAndCreateDir() {
@@ -40,41 +48,52 @@ public class JeiiiMod {
         }
     }
 
+    @SubscribeEvent
+    public void onServerStarting(ServerStartingEvent event) {
+        processSmpFiles();
+    }
+
     private void processSmpFiles() {
+        List<PacketSyncJeiInfo.Entry> entries = new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(CONFIG_DIR, "*.smp")) {
             for (Path file : stream) {
-                processSingleFile(file);
+                entries.addAll(processSingleFile(file));
             }
         } catch (IOException e) {
-            // 异常处理
+            e.printStackTrace();
+        }
+
+        if (!entries.isEmpty()) {
+            NetworkManager.INSTANCE.send(
+                    PacketDistributor.ALL.noArg(),
+                    new PacketSyncJeiInfo(entries)
+            );
         }
     }
 
-    private void processSingleFile(Path file) {
+    private List<PacketSyncJeiInfo.Entry> processSingleFile(Path file) {
+        List<PacketSyncJeiInfo.Entry> entries = new ArrayList<>();
         try (Reader reader = Files.newBufferedReader(file)) {
             JsonElement root = JsonParser.parseReader(reader);
             if (root.isJsonArray()) {
                 for (JsonElement element : root.getAsJsonArray()) {
-                    processJsonObject(element.getAsJsonObject());
+                    processJsonObject(element.getAsJsonObject(), entries);
                 }
             } else if (root.isJsonObject()) {
-                processJsonObject(root.getAsJsonObject());
+                processJsonObject(root.getAsJsonObject(), entries);
             }
-        } catch (IOException | JsonParseException e) {
-            // 异常处理
+        } catch (Exception e) {
+            e.printStackTrace();
         }
+        return entries;
     }
 
-    // 修改processJsonObject方法中的调用
-    private void processJsonObject(JsonObject obj) {
+    private void processJsonObject(JsonObject obj, List<PacketSyncJeiInfo.Entry> entries) {
         if (validateJson(obj)) {
-            String itemId = obj.get("item").getAsString();
-            String content = obj.get("content").getAsString();
-
-            Item item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(itemId));
-            if (item != null) {
-                JeiiPlugin.registerInfo(item, content);
-            }
+            entries.add(new PacketSyncJeiInfo.Entry(
+                    obj.get("item").getAsString(),
+                    obj.get("content").getAsString()
+            ));
         }
     }
 
@@ -83,7 +102,9 @@ public class JeiiiMod {
     }
 
     @SubscribeEvent
-    public void onServerStarting(ServerStartingEvent event) {
-        // 服务器端初始化逻辑
+    public void onPlayerJoin(EntityJoinLevelEvent event) {
+        if (!event.getLevel().isClientSide && event.getEntity() instanceof ServerPlayer player) {
+            processSmpFiles();
+        }
     }
 }

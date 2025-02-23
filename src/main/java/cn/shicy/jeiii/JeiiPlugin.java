@@ -18,8 +18,7 @@ public class JeiiPlugin implements IModPlugin {
     private static final Map<Item, Component[]> ITEM_INFO = new HashMap<>();
     private static final ResourceLocation ID = new ResourceLocation(JeiiiMod.MODID, "main");
 
-    public static void registerInfo(Item item, String description) {
-        // 将字符串转换为Component数组
+    public static void registerClientInfo(Item item, String description) {
         Component[] components = Arrays.stream(description.split("\n"))
                 .map(Component::literal)
                 .toArray(Component[]::new);
@@ -33,13 +32,12 @@ public class JeiiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
-        ITEM_INFO.forEach((item, components) -> {
-            ItemStack stack = new ItemStack(item);
-            registration.addIngredientInfo(
-                    stack,
-                    VanillaTypes.ITEM_STACK,
-                    components // 使用Component数组
-            );
-        });
+        ITEM_INFO.forEach((item, components) ->
+                registration.addIngredientInfo(
+                        new ItemStack(item),
+                        VanillaTypes.ITEM_STACK,
+                        components
+                )
+        );
     }
 }
